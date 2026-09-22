@@ -1,0 +1,58 @@
+workflows:
+  android-release:
+    name: Parrot Training - Android Release
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      vars:
+        PACKAGE_NAME: "com.parrottraining.app"
+      java: 17
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: "*"
+          include: true
+    scripts:
+      - name: Extract project from ParrotTraining.zip
+        script: |
+          # The repository only contains the zipped project + this codemagic.yaml.
+          # Unzip everything (app/, gradle/, build.gradle.kts, settings.gradle.kts,
+          # gradlew...) directly into the checkout root before building.
+          if [ -f ParrotTraining.zip ]; then
+            unzip -o -q ParrotTraining.zip -d .
+          fi
+          chmod +x ./gradlew || true
+
+      - name: Regenerate Gradle wrapper jar
+        script: |
+          # The wrapper jar is a binary file and is intentionally not committed to the
+          # repository. Codemagic images ship Gradle globally, so we (re)create the
+          # wrapper here before using ./gradlew for the rest of the build.
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
+          chmod +x ./gradlew
+
+      - name: Decode keystore (optional, only if you added CM_KEYSTORE as an env variable)
+        script: |
+          if [ -n "$CM_KEYSTORE" ]; then
+            echo "$CM_KEYSTORE" | base64 --decode > /tmp/keystore.jks
+            echo "CM_KEYSTORE_PATH=/tmp/keystore.jks" >> $CM_ENV
+          fi
+
+      - name: Build release APK
+        script: |
+          ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Build debug APK (always installable, for quick testing)
+        script: |
+          ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Run unit tests
+        script: |
+          ./gradlew :app:testDebugUnitTest --stacktrace
+
+    artifacts:
+      - app/build/outputs/apk/release/app-release.apk
+      - app/build/outputs/apk/debug/app-debug.apk
+      - app/build/outputs/**/*.apk
+      - app/build/reports/tests/**
